@@ -3,7 +3,9 @@ const http = require("http");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const connectDB = require("./config/db");
-const { initializeSocket } = require("../src/socket/socket");
+//  const { initializeSocket } = require("../src/socket/socket");
+// ✅ correct
+const { initializeSocket } = require("./socket/socket");
 
 dotenv.config();
 connectDB();
