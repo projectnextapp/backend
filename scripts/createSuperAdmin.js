@@ -39,7 +39,7 @@ async function createSuperAdmin() {
       "⚠️  IMPORTANT: Change the password immediately after first login!",
     );
     console.log("");
-    console.log("Login at: http://localhost:3000/superadmin/login");
+    console.log("Login at: https://backend-083k.onrender.com/superadmin/login");
 
     process.exit(0);
   } catch (err) {

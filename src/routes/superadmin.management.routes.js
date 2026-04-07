@@ -7,6 +7,7 @@ const {
   toggleExecutive,
   sendNotification,
   getPlatformStats,
+  deleteGroup, // 👈 ADD THIS
 } = require("../controllers/superadmin.management.controller");
 const { protectSuperAdmin } = require("../middleware/superadmin.middleware");
 
@@ -19,6 +20,9 @@ router.get("/stats", getPlatformStats);
 // Group management
 router.get("/groups", getAllGroups);
 router.get("/groups/:id", getGroupDetails);
+
+// Delete group
+router.delete("/groups/:groupId", deleteGroup);
 
 // Activate/Deactivate
 router.patch("/groups/:groupId/admin/toggle", toggleGroupAdmin);

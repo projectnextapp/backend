@@ -398,3 +398,46 @@ exports.getPlatformStats = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// ═══════════════════════════════════════════════════════════
+// @desc    Delete Group and All Related Records
+// @route   DELETE /api/superadmin/groups/:groupId
+// @access  Private (Super Admin)
+// ═══════════════════════════════════════════════════════════
+exports.deleteGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    const group = await Group.findById(groupId);
+
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        message: "Group not found",
+      });
+    }
+
+    // ❗ Delete all related data FIRST (important)
+    await Member.deleteMany({ group: groupId });
+    // await Notification.deleteMany({ group: groupId });..
+
+    // 👉 If you have other models, delete them here too
+    // e.g:
+    // await Payment.deleteMany({ group: groupId });
+    // await Event.deleteMany({ group: groupId });
+
+    // ❗ Finally delete the group
+    await group.deleteOne();
+
+    res.json({
+      success: true,
+      message: "Group and all related records deleted successfully",
+    });
+  } catch (err) {
+    console.error("Delete group error:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
