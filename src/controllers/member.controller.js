@@ -1,5 +1,6 @@
 const Member = require("../models/Member.model");
 const Notification = require("../models/Notification.model");
+const Group = require("../models/Group.model");
 
 // ─────────────────────────────────────────────────────────────
 // Helper to get the active group ID from the request
