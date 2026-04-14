@@ -3,8 +3,7 @@ const http = require("http");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const connectDB = require("./config/db");
-//  const { initializeSocket } = require("../src/socket/socket");
-// ✅ correct
+
 const { initializeSocket } = require("./socket/socket");
 
 dotenv.config();
@@ -63,7 +62,10 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
+  // console.log(
+  //   `✅ AGMS Server now running ${PORT} in ${process.env.NODE_ENV} mode`,
+  // );
   console.log(
-    `✅ AGMS Server running on port ${PORT} in ${process.env.NODE_ENV} mode`,
+    `✅ AGMS Server now running `,
   );
 });

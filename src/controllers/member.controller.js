@@ -223,12 +223,10 @@ exports.updateMember = async (req, res) => {
 
     // Non-admins can only edit themselves
     if (!isAdmin && req.member._id.toString() !== req.params.id) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "Cannot edit another member profile",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "Cannot edit another member profile",
+      });
     }
 
     const member = await Member.findOne({ _id: req.params.id, group: groupId });
@@ -373,5 +371,420 @@ exports.sendBirthdayWish = async (req, res) => {
     res.json({ success: true, message: "Birthday wish sent!" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ================================================================
+// ADD TO: backend/src/controllers/member.controller.js
+// ================================================================
+// Member self-registration function
+// ================================================================
+
+// ═══════════════════════════════════════════════════════════
+// @desc    Member self-registration (Public)
+// @route   POST /api/members/self-register
+// @access  Public
+// ═══════════════════════════════════════════════════════════
+exports.selfRegister = async (req, res) => {
+  try {
+    const {
+      groupId,
+      name,
+      email,
+      phone,
+      password,
+      dateOfBirth,
+      career,
+      maritalStatus,
+      occupation,
+      stateOfOrigin,
+      localGovernment,
+      countryOfResidence,
+      residentialAddress,
+      nextOfKin,
+    } = req.body;
+
+    // 1. VALIDATE REQUIRED FIELDS
+    if (!groupId || !name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Please provide all required fields: groupId, name, email, password",
+      });
+    }
+
+    // 2. VERIFY GROUP EXISTS
+    const group = await Group.findById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        message: "Invalid Group ID. Please check and try again.",
+      });
+    }
+
+    // 3. CHECK IF EMAIL ALREADY EXISTS IN THIS GROUP
+    const existingMember = await Member.findOne({
+      email: email.toLowerCase(),
+      group: groupId,
+    });
+
+    if (existingMember) {
+      return res.status(400).json({
+        success: false,
+        message: "A member with this email already exists in this association.",
+      });
+    }
+
+    // 4. CREATE MEMBER WITH PENDING STATUS
+    const member = await Member.create({
+      group: groupId,
+      name,
+      email: email.toLowerCase(),
+      phone,
+      password, // Will be hashed by pre-save hook
+      dateOfBirth,
+      career,
+      role: "member", // Default role
+      status: "pending", // IMPORTANT: Set to pending
+      paymentStatus: "unpaid",
+      privateInfo: {
+        maritalStatus,
+        occupation,
+        stateOfOrigin,
+        localGovernment,
+        countryOfResidence,
+        residentialAddress,
+        nextOfKin: nextOfKin
+          ? typeof nextOfKin === "string"
+            ? JSON.parse(nextOfKin)
+            : nextOfKin
+          : null,
+      },
+    });
+
+    // 5. NOTIFY ADMINS (Optional - create notifications for admins)
+    try {
+      // Find all admins in this group
+      const admins = await Member.find({
+        group: groupId,
+        role: { $in: ["admin", "president", "secretary", "treasurer"] },
+        status: "active",
+      });
+
+      // Create notification for each admin
+      const notifications = admins.map((admin) => ({
+        group: groupId,
+        recipient: admin._id,
+        type: "member_approval",
+        title: "📝 New Member Registration",
+        message: `${name} has registered and is awaiting approval.`,
+      }));
+
+      if (notifications.length > 0) {
+        await Notification.insertMany(notifications);
+      }
+    } catch (notifErr) {
+      console.error("Error creating notifications:", notifErr);
+      // Don't fail registration if notification fails
+    }
+
+    // 6. SEND SUCCESS RESPONSE (without password)
+    const memberResponse = {
+      _id: member._id,
+      name: member.name,
+      email: member.email,
+      phone: member.phone,
+      group: member.group,
+      status: member.status,
+      role: member.role,
+    };
+
+    res.status(201).json({
+      success: true,
+      message: `Registration successful! Your account is pending approval by ${group.name} administrators.`,
+      data: memberResponse,
+    });
+  } catch (err) {
+    console.error("Self-registration error:", err);
+
+    // Handle duplicate email error
+    if (err.code === 11000 && err.keyPattern?.email) {
+      return res.status(400).json({
+        success: false,
+        message: "This email is already registered.",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Registration failed. Please try againsr.",
+      error: err.message,
+    });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════
+// @desc    Get pending members (Admin only)
+// @route   GET /api/members/pending
+// @access  Private (Admin, President, Secretary, Treasurer)
+// ═══════════════════════════════════════════════════════════
+exports.getPendingMembers = async (req, res) => {
+  try {
+    const groupId = getGroupId(req);
+
+    // Check if user has admin rights
+    const isAdmin =
+      req.userType === "group" ||
+      ["admin", "president", "secretary", "treasurer"].includes(
+        req.member?.role,
+      );
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Only administrators can view pending members.",
+      });
+    }
+
+    // Get all pending members
+    const pendingMembers = await Member.find({
+      group: groupId,
+      status: "pending",
+    }).sort({ createdAt: -1 }); // Newest first
+
+    res.json({
+      success: true,
+      count: pendingMembers.length,
+      data: pendingMembers,
+    });
+  } catch (err) {
+    console.error("Error fetching pending members:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch pending members",
+      error: err.message,
+    });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════
+// @desc    Approve member registration
+// @route   PATCH /api/members/:id/approve
+// @access  Private (Admin, President, Secretary, Treasurer)
+// ═══════════════════════════════════════════════════════════
+// exports.approveMember = async (req, res) => {
+//   try {
+//     const groupId = getGroupId(req);
+//     const memberId = req.params.id;
+
+//     // Check if user has admin rights
+//     const isAdmin = req.userType === 'group' ||
+//                     ['admin', 'president', 'secretary', 'treasurer'].includes(req.member?.role);
+
+//     if (!isAdmin) {
+//       return res.status(403).json({
+//         success: false,
+//         message: 'Access denied. Only administrators can approve members.'
+//       });
+//     }
+
+//     // Find and update member
+//     const member = await Member.findOneAndUpdate(
+//       { _id: memberId, group: groupId, status: 'pending' },
+//       {
+//         status: 'active',
+//         approvedBy: req.userType === 'group' ? req.user._id : req.member._id,
+//         approvedAt: new Date()
+//       },
+//       { new: true }
+//     );
+
+//     if (!member) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Member not found or already processed.'
+//       });
+//     }
+
+//     // Send notification to approved member
+//     try {
+//       await Notification.create({
+//         group: groupId,
+//         recipient: member._id,
+//         type: 'member_approved',
+//         title: '✅ Registration Approved',
+//         message: 'Congratulations! Your membership has been approved. You can now login and access all features.'
+//       });
+//     } catch (notifErr) {
+//       console.error('Error creating approval notification:', notifErr);
+//     }
+
+//     res.json({
+//       success: true,
+//       message: `${member.name} has been approved successfully!`,
+//       data: member
+//     });
+
+//   } catch (err) {
+//     console.error('Error approving member:', err);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to approve member',
+//       error: err.message
+//     });
+//   }
+// };
+
+// ═══════════════════════════════════════════════════════════
+// @desc    Reject member registration
+// @route   PATCH /api/members/:id/reject
+// @access  Private (Admin, President, Secretary, Treasurer)
+// ═══════════════════════════════════════════════════════════
+exports.rejectMember = async (req, res) => {
+  try {
+    const groupId = getGroupId(req);
+    const memberId = req.params.id;
+    const { reason } = req.body;
+
+    // Check if user has admin rights
+    const isAdmin =
+      req.userType === "group" ||
+      ["admin", "president", "secretary", "treasurer"].includes(
+        req.member?.role,
+      );
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Only administrators can reject members.",
+      });
+    }
+
+    // Find member
+    const member = await Member.findOne({
+      _id: memberId,
+      group: groupId,
+      status: "pending",
+    });
+
+    if (!member) {
+      return res.status(404).json({
+        success: false,
+        message: "Member not found or already processed.",
+      });
+    }
+
+    // Send notification before deleting
+    try {
+      await Notification.create({
+        group: groupId,
+        recipient: member._id,
+        type: "general",
+        title: "❌ Registration Rejected",
+        message:
+          reason ||
+          "Your membership registration has been rejected. Please contact the administrator for more information.",
+      });
+    } catch (notifErr) {
+      console.error("Error creating rejection notification:", notifErr);
+    }
+
+    // Delete the member (or you could set status to 'rejected' instead)
+    await Member.findByIdAndDelete(memberId);
+
+    res.json({
+      success: true,
+      message: `Registration for ${member.name} has been rejected.`,
+    });
+  } catch (err) {
+    console.error("Error rejecting member:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to reject member",
+      error: err.message,
+    });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════
+// @desc    Bulk approve members
+// @route   POST /api/members/bulk-approve
+// @access  Private (Admin, President, Secretary, Treasurer)
+// ═══════════════════════════════════════════════════════════
+exports.bulkApprovemembers = async (req, res) => {
+  try {
+    const groupId = getGroupId(req);
+    const { memberIds } = req.body;
+
+    // Check if user has admin rights
+    const isAdmin =
+      req.userType === "group" ||
+      ["admin", "president", "secretary", "treasurer"].includes(
+        req.member?.role,
+      );
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Only administrators can approve members.",
+      });
+    }
+
+    if (!memberIds || !Array.isArray(memberIds) || memberIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide an array of member IDs.",
+      });
+    }
+
+    // Update all members
+    const result = await Member.updateMany(
+      {
+        _id: { $in: memberIds },
+        group: groupId,
+        status: "pending",
+      },
+      {
+        status: "active",
+        approvedBy: req.userType === "group" ? req.user._id : req.member._id,
+        approvedAt: new Date(),
+      },
+    );
+
+    // Send notifications to all approved members
+    try {
+      const approvedMembers = await Member.find({
+        _id: { $in: memberIds },
+        group: groupId,
+      });
+
+      const notifications = approvedMembers.map((member) => ({
+        group: groupId,
+        recipient: member._id,
+        type: "member_approved",
+        title: "✅ Registration Approved",
+        message:
+          "Congratulations! Your membership has been approved. You can now login and access all features.",
+      }));
+
+      if (notifications.length > 0) {
+        await Notification.insertMany(notifications);
+      }
+    } catch (notifErr) {
+      console.error("Error creating bulk notifications:", notifErr);
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully approved ${result.modifiedCount} member(s)!`,
+      count: result.modifiedCount,
+    });
+  } catch (err) {
+    console.error("Error bulk approving members:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to approve members",
+      error: err.message,
+    });
   }
 };

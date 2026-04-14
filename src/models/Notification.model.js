@@ -21,6 +21,7 @@ const NotificationSchema = new mongoose.Schema(
         "birthday_wish",
         "meeting_notice",
         "member_approved",
+        'member_approval',      // ← ADD THIS NEW LINE
         "member_deactivated",
         "role_changed",
         "general",
