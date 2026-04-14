@@ -136,7 +136,7 @@ exports.memberLogin = async (req, res) => {
         .status(403)
         .json({
           success: false,
-          message: "Your membership is pending approval",
+          message: "Your membership is pending approval: contact your admin",
         });
     }
     if (member.status === "inactive") {
